@@ -124,7 +124,7 @@ export default function SignupScreen() {
       });
 
       // After sign-up, open Profile Creation screen
-      router.replace('/profile-creation');
+      router.replace('/profile-creation' as any);
     } catch (e: any) {
       setErrors({ form: e.message || 'Registration failed. Please check your information.' });
     } finally {
@@ -159,7 +159,7 @@ export default function SignupScreen() {
           </View>
 
           {/* Form-level Error Banner */}
-          {errors.form && (
+          {Boolean(errors.form) && (
             <View style={[styles.bannerError, { backgroundColor: '#EF444420' }]}>
               <Ionicons name="alert-circle" size={18} color={colors.danger} />
               <Text style={[styles.bannerErrorText, { color: colors.danger }]}>
@@ -310,7 +310,7 @@ export default function SignupScreen() {
                 </View>
               </View>
 
-              {errors.dob ? (
+              {Boolean(errors.dob) ? (
                 <View style={styles.dobErrorRow}>
                   <Ionicons name="alert-circle" size={14} color={colors.danger} />
                   <Text style={[styles.errorText, { color: colors.danger }]}>
@@ -366,15 +366,15 @@ export default function SignupScreen() {
               }}
               error={errors.terms}>
               <Text style={[styles.termsText, { color: colors.textSecondary }]}>
-                I accept the{' '}
+                {'I accept the '}
                 <Text style={{ color: colors.primary, fontWeight: '700' }}>
                   Terms of Service
-                </Text>{' '}
-                and{' '}
+                </Text>
+                {' and '}
                 <Text style={{ color: colors.primary, fontWeight: '700' }}>
                   Privacy Policy
                 </Text>
-                , and confirm I am aged 18 or above.
+                {', and confirm I am aged 18 or above.'}
               </Text>
             </Checkbox>
           </View>
@@ -394,9 +394,9 @@ export default function SignupScreen() {
             {/* Link to Login screen */}
             <View style={styles.loginLinkRow}>
               <Text style={[styles.loginPromptText, { color: colors.textSecondary }]}>
-                Already have an account?{' '}
+                {'Already have an account? '}
               </Text>
-              <TouchableOpacity onPress={() => router.push('/login')}>
+              <TouchableOpacity onPress={() => router.push('/login' as any)}>
                 <Text style={[styles.loginLinkText, { color: colors.primary }]}>
                   Log In
                 </Text>

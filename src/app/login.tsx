@@ -57,7 +57,7 @@ export default function LoginScreen() {
     try {
       const result = await login(email);
       if (result && !result.hasCompletedProfile) {
-        router.replace('/profile-creation');
+        router.replace('/profile-creation' as any);
       } else {
         // Route to home tabs upon successful login
         router.replace('/(tabs)');
@@ -101,7 +101,7 @@ export default function LoginScreen() {
           </View>
 
           {/* Form-level Error Banner */}
-          {errors.form && (
+          {Boolean(errors.form) && (
             <View style={[styles.bannerError, { backgroundColor: '#EF444420' }]}>
               <Ionicons name="alert-circle" size={18} color={colors.danger} />
               <Text style={[styles.bannerErrorText, { color: colors.danger }]}>
@@ -180,7 +180,7 @@ export default function LoginScreen() {
               <Text style={[styles.signupPromptText, { color: colors.textSecondary }]}>
                 {"Don't have an account? "}
               </Text>
-              <TouchableOpacity onPress={() => router.push('/signup')}>
+              <TouchableOpacity onPress={() => router.push('/signup' as any)}>
                 <Text style={[styles.signupLinkText, { color: colors.primary }]}>
                   Sign Up
                 </Text>

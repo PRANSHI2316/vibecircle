@@ -134,7 +134,7 @@ export default function ProfileCreationScreen() {
           </View>
 
           {/* Form-level Error Banner */}
-          {errors.form && (
+          {Boolean(errors.form) && (
             <View style={[styles.bannerError, { backgroundColor: '#EF444420' }]}>
               <Ionicons name="alert-circle" size={18} color={colors.danger} />
               <Text style={[styles.bannerErrorText, { color: colors.danger }]}>
@@ -256,7 +256,7 @@ export default function ProfileCreationScreen() {
               ))}
             </View>
 
-            {errors.interests && (
+            {Boolean(errors.interests) && (
               <View style={styles.errorRow}>
                 <Ionicons name="alert-circle" size={14} color={colors.danger} />
                 <Text style={[styles.errorText, { color: colors.danger }]}>

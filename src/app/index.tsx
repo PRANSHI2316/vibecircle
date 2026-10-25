@@ -27,7 +27,7 @@ export default function WelcomeScreen() {
     if (user?.hasCompletedProfile) {
       router.replace('/(tabs)');
     } else {
-      router.replace('/profile-creation');
+      router.replace('/profile-creation' as any);
     }
   };
 
@@ -140,7 +140,7 @@ export default function WelcomeScreen() {
             <>
               <CustomButton
                 title="Get Started (Create Account)"
-                onPress={() => router.push('/signup')}
+                onPress={() => router.push('/signup' as any)}
                 variant="primary"
                 size="lg"
                 icon="sparkles"
@@ -149,7 +149,7 @@ export default function WelcomeScreen() {
 
               <CustomButton
                 title="Log In to Existing Account"
-                onPress={() => router.push('/login')}
+                onPress={() => router.push('/login' as any)}
                 variant="outline"
                 size="md"
                 style={{ marginBottom: 12 }}

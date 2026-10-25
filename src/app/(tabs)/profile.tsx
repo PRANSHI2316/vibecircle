@@ -56,7 +56,7 @@ export default function ProfileScreen() {
   };
 
   const handleEditProfile = () => {
-    router.push('/profile-creation');
+    router.push('/profile-creation' as any);
   };
 
   const handlePremiumTeaser = () => {

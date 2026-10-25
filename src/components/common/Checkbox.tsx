@@ -48,15 +48,15 @@ export function Checkbox({
         <View style={styles.textContainer}>
           {children ? (
             children
-          ) : (
+          ) : label ? (
             <Text style={[styles.label, { color: colors.textSecondary }]}>
               {label}
             </Text>
-          )}
+          ) : null}
         </View>
       </TouchableOpacity>
 
-      {error && (
+      {Boolean(error) && (
         <View style={styles.errorRow}>
           <Ionicons name="alert-circle" size={14} color={colors.danger} style={{ marginRight: 4 }} />
           <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text>

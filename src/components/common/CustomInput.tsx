@@ -70,10 +70,10 @@ export const CustomInput = React.forwardRef<React.ComponentRef<typeof TextInput>
 
   return (
     <View style={[styles.container, containerStyle]}>
-      {label && (
+      {Boolean(label) && (
         <View style={styles.labelRow}>
           <Text style={[styles.label, { color: colors.textSecondary }]}>{label}</Text>
-          {showCharCount && maxLength && (
+          {Boolean(showCharCount && maxLength) && (
             <Text style={[styles.charCount, { color: colors.textMuted }]}>
               {value.length}/{maxLength}
             </Text>
@@ -96,7 +96,7 @@ export const CustomInput = React.forwardRef<React.ComponentRef<typeof TextInput>
           multiline && { minHeight: 90, alignItems: 'flex-start', paddingTop: 12 },
         ]}>
         {/* Phone Prefix Badge (+91 India) */}
-        {isPhone && (
+        {Boolean(isPhone) && (
           <View style={[styles.phoneBadge, { borderRightColor: colors.inputBorder }]}>
             <Text style={styles.indiaFlag}>🇮🇳</Text>
             <Text style={[styles.phoneCode, { color: colors.text }]}>+91</Text>
@@ -104,9 +104,9 @@ export const CustomInput = React.forwardRef<React.ComponentRef<typeof TextInput>
         )}
 
         {/* Left Icon (if not phone) */}
-        {leftIcon && !isPhone && (
+        {Boolean(leftIcon && !isPhone) && (
           <Ionicons
-            name={leftIcon}
+            name={leftIcon!}
             size={20}
             color={isFocused ? colors.primary : colors.textSecondary}
             style={styles.leftIcon}
@@ -141,7 +141,7 @@ export const CustomInput = React.forwardRef<React.ComponentRef<typeof TextInput>
         />
 
         {/* Password Eye Toggle */}
-        {showPasswordToggle && (
+        {Boolean(showPasswordToggle) && (
           <TouchableOpacity
             onPress={() => setIsPasswordVisible(!isPasswordVisible)}
             hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
@@ -163,7 +163,7 @@ export const CustomInput = React.forwardRef<React.ComponentRef<typeof TextInput>
       </View>
 
       {/* Error Message */}
-      {error ? (
+      {Boolean(error) ? (
         <View style={styles.helperRow}>
           <Ionicons name="alert-circle" size={14} color={colors.danger} style={{ marginRight: 4 }} />
           <Text style={[styles.errorText, { color: colors.danger }]}>{error}</Text>
