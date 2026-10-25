@@ -7,7 +7,9 @@ import { useColorScheme as useRNColorScheme } from 'react-native';
 export function useColorScheme() {
   const [hasHydrated, setHasHydrated] = useState(false);
 
+  // Hydration state check for SSR/web static rendering
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setHasHydrated(true);
   }, []);
 
