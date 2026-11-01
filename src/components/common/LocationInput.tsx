@@ -25,6 +25,99 @@ interface LocationInputProps {
   label?: string;
 }
 
+/**
+ * Reverse geocode latitude and longitude into city and region.
+ * Uses Nominatim OpenStreetMap (supports Web & Native with CORS).
+ */
+async function reverseGeocodeCoords(latitude: number, longitude: number): Promise<string> {
+  // 1. If native platform, try native expo-location reverse geocoder first
+  if (Platform.OS !== 'web') {
+    try {
+      const places = await Location.reverseGeocodeAsync({ latitude, longitude });
+      if (places && places.length > 0) {
+        const p = places[0];
+        const city = p.city || p.subregion || p.district || p.region;
+        const state = p.region;
+        if (city && state && city !== state) {
+          return `${city}, ${state}`;
+        }
+        if (city) return city;
+      }
+    } catch {
+      // Fall through to web reverse geocoder
+    }
+  }
+
+  // 2. Web or fallback: OpenStreetMap Nominatim reverse geocode
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 6000);
+    const resp = await fetch(
+      `https://nominatim.openstreetmap.org/reverse?format=json&lat=${latitude}&lon=${longitude}`,
+      {
+        headers: {
+          Accept: 'application/json',
+          'Accept-Language': 'en',
+        },
+        signal: controller.signal,
+      }
+    );
+    clearTimeout(timeout);
+
+    if (resp.ok) {
+      const data = await resp.json();
+      const addr = data.address || {};
+      const city =
+        addr.city ||
+        addr.town ||
+        addr.village ||
+        addr.suburb ||
+        addr.state_district ||
+        addr.county ||
+        addr.state;
+      const state = addr.state;
+
+      if (city && state && city !== state) {
+        return `${city}, ${state}`;
+      }
+      if (city) return city;
+    }
+  } catch {
+    // Ignore and fallback below
+  }
+
+  return `Location (${latitude.toFixed(2)}, ${longitude.toFixed(2)})`;
+}
+
+/**
+ * IP-based location fallback (used if browser has no GPS hardware or times out).
+ */
+async function fetchIpLocation(): Promise<{ city: string; latitude: number; longitude: number } | null> {
+  try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 5000);
+    const resp = await fetch('https://ipwho.is/', { signal: controller.signal });
+    clearTimeout(timeout);
+    if (resp.ok) {
+      const data = await resp.json();
+      if (data && data.success && data.city) {
+        const fullCity =
+          data.region && data.region !== data.city
+            ? `${data.city}, ${data.region}`
+            : data.city;
+        return {
+          city: fullCity,
+          latitude: data.latitude || 0,
+          longitude: data.longitude || 0,
+        };
+      }
+    }
+  } catch {
+    // Ignore
+  }
+  return null;
+}
+
 export function LocationInput({
   value,
   onChangeText,
@@ -42,66 +135,116 @@ export function LocationInput({
    * Request device location permission and detect city.
    */
   const handleDetectLocation = async () => {
-    setStatusNotice(null);
+    setStatusNotice('Detecting location...');
     setLoading(true);
 
     try {
-      // 1. Explicitly request permission
+      // --- WEB PLATFORM IMPLEMENTATION ---
+      if (Platform.OS === 'web') {
+        if (typeof window === 'undefined' || !navigator || !navigator.geolocation) {
+          const fallback = await fetchIpLocation();
+          if (fallback) {
+            onChangeText(fallback.city);
+            onLocationDetected?.({
+              city: fallback.city,
+              coords: { latitude: fallback.latitude, longitude: fallback.longitude },
+            });
+            setStatusNotice(`📍 Detected: ${fallback.city}`);
+          } else {
+            setStatusNotice('Geolocation is not supported in this browser. Please type your city manually.');
+          }
+          return;
+        }
+
+        // Request browser geolocation (triggers browser prompt)
+        await new Promise<void>((resolve) => {
+          navigator.geolocation.getCurrentPosition(
+            async (pos) => {
+              try {
+                const { latitude, longitude } = pos.coords;
+                const detectedCity = await reverseGeocodeCoords(latitude, longitude);
+                onChangeText(detectedCity);
+                onLocationDetected?.({
+                  city: detectedCity,
+                  coords: { latitude, longitude },
+                });
+                setStatusNotice(`📍 Detected: ${detectedCity}`);
+              } catch {
+                setStatusNotice('Could not format city name. Please enter manually.');
+              } finally {
+                resolve();
+              }
+            },
+            async (posError) => {
+              // Code 1: PERMISSION_DENIED
+              if (posError.code === 1) {
+                const deniedMsg =
+                  'Location permission was denied. To enable, click the 🔒 lock icon in your browser URL bar and set Location to "Allow", or type your city manually below.';
+                setStatusNotice(deniedMsg);
+                resolve();
+                return;
+              }
+
+              // Code 2 (POSITION_UNAVAILABLE) or Code 3 (TIMEOUT)
+              // Common on desktop PCs without GPS chips: use network IP location fallback
+              try {
+                const ipResult = await fetchIpLocation();
+                if (ipResult) {
+                  onChangeText(ipResult.city);
+                  onLocationDetected?.({
+                    city: ipResult.city,
+                    coords: { latitude: ipResult.latitude, longitude: ipResult.longitude },
+                  });
+                  setStatusNotice(`📍 Detected: ${ipResult.city}`);
+                  resolve();
+                  return;
+                }
+              } catch {
+                // Ignore
+              }
+
+              const msg =
+                posError.code === 3
+                  ? 'Location request timed out. Please enter your city manually.'
+                  : 'Unable to pinpoint GPS location. Please enter your city manually.';
+              setStatusNotice(msg);
+              resolve();
+            },
+            {
+              enableHighAccuracy: false,
+              timeout: 10000,
+              maximumAge: 60000,
+            }
+          );
+        });
+
+        return;
+      }
+
+      // --- NATIVE PLATFORM (iOS / Android) IMPLEMENTATION ---
       const { status } = await Location.requestForegroundPermissionsAsync();
 
       if (status !== 'granted') {
         const deniedMsg =
           'Location permission was denied. You can easily type your city manually below.';
         setStatusNotice(deniedMsg);
-        if (Platform.OS === 'web') {
-          window.alert(deniedMsg);
-        } else {
-          Alert.alert('Location Permission', deniedMsg);
-        }
+        Alert.alert('Location Permission', deniedMsg);
         return;
       }
 
-      // 2. Fetch current GPS position
       const position = await Location.getCurrentPositionAsync({
         accuracy: Location.Accuracy.Balanced,
       });
 
       const { latitude, longitude } = position.coords;
+      const detectedCity = await reverseGeocodeCoords(latitude, longitude);
 
-      // 3. Reverse geocode to find city and region
-      const geocode = await Location.reverseGeocodeAsync({
-        latitude,
-        longitude,
+      onChangeText(detectedCity);
+      onLocationDetected?.({
+        city: detectedCity,
+        coords: { latitude, longitude },
       });
-
-      if (geocode && geocode.length > 0) {
-        const place = geocode[0];
-        const detectedCity =
-          place.city ||
-          place.subregion ||
-          place.district ||
-          place.region ||
-          'Mumbai';
-
-        const neighborhood = place.name || place.street;
-        const displayLocation =
-          neighborhood && neighborhood !== detectedCity
-            ? `${detectedCity} (${neighborhood})`
-            : detectedCity;
-
-        onChangeText(displayLocation);
-
-        if (onLocationDetected) {
-          onLocationDetected({
-            city: displayLocation,
-            coords: { latitude, longitude },
-          });
-        }
-
-        setStatusNotice(`📍 Detected: ${displayLocation}`);
-      } else {
-        setStatusNotice('Could not pinpoint city. Please enter manually.');
-      }
+      setStatusNotice(`📍 Detected: ${detectedCity}`);
     } catch (err: any) {
       const errMsg =
         err?.message ||
@@ -111,6 +254,8 @@ export function LocationInput({
       setLoading(false);
     }
   };
+
+  const isSuccessNotice = statusNotice?.startsWith('📍');
 
   return (
     <View style={styles.container}>
@@ -168,11 +313,30 @@ export function LocationInput({
         )}
       </View>
 
-      {/* Friendly notice if granted or denied */}
+      {/* Friendly notice if granted, denied, or fallback */}
       {statusNotice && (
-        <Text style={[styles.noticeText, { color: colors.textSecondary }]}>
-          {statusNotice}
-        </Text>
+        <View
+          style={[
+            styles.noticeBox,
+            {
+              backgroundColor: isSuccessNotice ? '#10B98115' : '#FEF3C7',
+              borderColor: isSuccessNotice ? '#10B98140' : '#F59E0B40',
+            },
+          ]}>
+          <Ionicons
+            name={isSuccessNotice ? 'checkmark-circle' : 'information-circle'}
+            size={14}
+            color={isSuccessNotice ? '#059669' : '#D97706'}
+            style={{ marginRight: 6, marginTop: 1 }}
+          />
+          <Text
+            style={[
+              styles.noticeText,
+              { color: isSuccessNotice ? '#059669' : '#92400E' },
+            ]}>
+            {statusNotice}
+          </Text>
+        </View>
       )}
 
       {/* Validation error if any */}
@@ -199,7 +363,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 8,
-    paddingVertical: 3,
+    paddingVertical: 4,
     borderRadius: 12,
     borderWidth: 1,
     gap: 4,
@@ -227,10 +391,20 @@ const styles = StyleSheet.create({
   clearBtn: {
     padding: 4,
   },
+  noticeBox: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginTop: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
   noticeText: {
-    fontSize: 11.5,
-    marginTop: 4,
-    fontStyle: 'italic',
+    flex: 1,
+    fontSize: 12,
+    lineHeight: 16,
+    fontWeight: '500',
   },
   errorText: {
     fontSize: 11.5,
