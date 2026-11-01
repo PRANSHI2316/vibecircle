@@ -12,7 +12,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
-type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'gold';
+type ButtonVariant = 'primary' | 'secondary' | 'outline' | 'ghost' | 'gold' | 'danger';
 type ButtonSize = 'sm' | 'md' | 'lg';
 
 interface CustomButtonProps {
@@ -87,6 +87,16 @@ export function CustomButton({
         variantStyle = {
           backgroundColor: '#D97706',
           shadowColor: '#D97706',
+          shadowOffset: { width: 0, height: 4 },
+          shadowOpacity: 0.35,
+          shadowRadius: 8,
+          elevation: 5,
+        };
+        break;
+      case 'danger':
+        variantStyle = {
+          backgroundColor: '#DC2626',
+          shadowColor: '#DC2626',
           shadowOffset: { width: 0, height: 4 },
           shadowOpacity: 0.35,
           shadowRadius: 8,

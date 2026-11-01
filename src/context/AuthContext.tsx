@@ -1,4 +1,22 @@
 import React, { createContext, useContext, useState, ReactNode } from 'react';
+import {
+  VerificationStatus,
+  KycDocumentType,
+  verifyIdentityDocument,
+  calculateAgeFromDob,
+} from '@/services/kycService';
+
+export type { VerificationStatus, KycDocumentType };
+
+export interface KycDocumentRecord {
+  documentType: KycDocumentType;
+  documentUri: string; // Ephemeral local preview only, never exposed publicly
+  documentName?: string;
+  submittedAt: string;
+  confirmedOwnership: boolean;
+  verifiedAge?: number;
+  rejectionReason?: string;
+}
 
 export interface UserProfile {
   id: string;
@@ -8,11 +26,20 @@ export interface UserProfile {
   phone: string;
   dob: string; // YYYY-MM-DD
   age: number; // Auto-calculated from DOB
-  avatar: string;
+  avatar: string; // Preset ID or custom uri marker
+  customAvatarUri?: string | null; // User's gallery uploaded photo
   bio: string;
   city: string;
+  detectedLocation?: {
+    city?: string;
+    region?: string;
+    country?: string;
+    coords?: { latitude: number; longitude: number };
+  } | null;
   interests: string[];
-  isVerified: boolean;
+  isVerified: boolean; // True only when verificationStatus === 'Verified'
+  verificationStatus: VerificationStatus;
+  kycDocument?: KycDocumentRecord | null;
   tier: 'Free Member' | '₹299 Club Premium';
   hasCompletedProfile: boolean;
 }
@@ -22,7 +49,9 @@ export interface SignupInput {
   email: string;
   phone: string;
   dob: string;
-  // NOTE: Password is intentionally NOT stored in plain text or state, in compliance with security guidelines.
+  customAvatarUri?: string | null;
+  city?: string;
+  // NOTE: Password is intentionally NOT stored in plain text or state.
 }
 
 export interface SaveProfileInput {
@@ -31,6 +60,7 @@ export interface SaveProfileInput {
   city: string;
   interests: string[];
   avatar: string;
+  customAvatarUri?: string | null;
 }
 
 export interface DobValidationResult {
@@ -43,10 +73,23 @@ export interface DobValidationResult {
 interface AuthContextType {
   user: UserProfile | null;
   isAuthenticated: boolean;
+  isVerifiedUser: boolean;
   signup: (input: SignupInput) => Promise<boolean>;
   login: (email: string) => Promise<{ success: boolean; hasCompletedProfile: boolean }>;
   loginDemo: () => void;
   saveProfile: (input: SaveProfileInput) => Promise<boolean>;
+  updateProfilePhoto: (photoUri: string | null) => Promise<void>;
+  updateLocation: (
+    city: string,
+    detectedCoords?: { latitude: number; longitude: number }
+  ) => Promise<void>;
+  submitKyc: (payload: {
+    documentType: KycDocumentType;
+    documentUri: string;
+    documentName?: string;
+    confirmedOwnership: boolean;
+  }) => Promise<{ status: VerificationStatus; message: string; verifiedAge?: number }>;
+  resetKyc: () => void;
   logout: () => void;
   calculateAge: (dob: string) => number;
   validateDob: (day: string, month: string, year: string) => DobValidationResult;
@@ -54,37 +97,22 @@ interface AuthContextType {
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
-/**
- * Timezone-safe age calculation from YYYY-MM-DD string.
- */
-export function calculateAge(dob: string): number {
-  if (!dob) return 0;
-  const parts = dob.split('-').map((p) => parseInt(p, 10));
-  if (parts.length !== 3 || parts.some(isNaN)) return 0;
-  const [birthYear, birthMonth, birthDay] = parts;
+export const calculateAge = calculateAgeFromDob;
 
-  const today = new Date();
-  const currentYear = today.getFullYear();
-  const currentMonth = today.getMonth() + 1; // 1-indexed (1-12)
-  const currentDay = today.getDate();
-
-  let age = currentYear - birthYear;
-  if (currentMonth < birthMonth || (currentMonth === birthMonth && currentDay < birthDay)) {
-    age--;
-  }
-  return Math.max(0, age);
-}
-
-/**
- * Validates birth day, month, and year inputs with calendar checks and 18+ requirement.
- */
-export function validateDob(day: string, month: string, year: string): DobValidationResult {
+export function validateDob(
+  day: string,
+  month: string,
+  year: string
+): DobValidationResult {
   const dStr = day.trim();
   const mStr = month.trim();
   const yStr = year.trim();
 
   if (!dStr || !mStr || !yStr) {
-    return { valid: false, error: 'Please enter your complete date of birth (DD / MM / YYYY)' };
+    return {
+      valid: false,
+      error: 'Please enter your complete date of birth (DD / MM / YYYY)',
+    };
   }
 
   const d = parseInt(dStr, 10);
@@ -133,7 +161,7 @@ export function validateDob(day: string, month: string, year: string): DobValida
   return { valid: true, age, formattedDob };
 }
 
-// Default initial demo user profile
+// Default initial demo user profile (Pre-verified for testing features)
 const DEMO_USER: UserProfile = {
   id: 'usr_demo_101',
   fullName: 'Pranav Sharma',
@@ -143,10 +171,19 @@ const DEMO_USER: UserProfile = {
   dob: '1999-06-15',
   age: calculateAge('1999-06-15') || 25,
   avatar: 'photo_1',
+  customAvatarUri: null,
   bio: 'Tech enthusiast, techno weekend regular, and coffee explorer in Bandra. Looking for clubbing squads and social hangouts!',
   city: 'Mumbai',
   interests: ['clubbing', 'nightlife', 'food', 'social hangouts'],
   isVerified: true,
+  verificationStatus: 'Verified',
+  kycDocument: {
+    documentType: 'Aadhaar Card',
+    documentUri: 'https://images.unsplash.com/photo-1544717305-2782549b5136?w=600',
+    submittedAt: '2026-01-15T10:00:00Z',
+    confirmedOwnership: true,
+    verifiedAge: 25,
+  },
   tier: 'Free Member',
   hasCompletedProfile: true,
 };
@@ -155,10 +192,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<UserProfile | null>(null);
   const [isAuthenticated, setIsAuthenticated] = useState<boolean>(false);
 
+  const isVerifiedUser = Boolean(user && user.verificationStatus === 'Verified');
+
   /**
-   * Phase 1 Mock Sign-up.
-   * Calculates age from date of birth and strictly ensures user is at least 18.
-   * Passwords are validated in the UI and never stored in memory or state.
+   * Phase 1 Sign-up.
+   * Calculates age from date of birth and initializes KYC status to 'Not Submitted'.
    */
   const signup = async (input: SignupInput): Promise<boolean> => {
     const age = calculateAge(input.dob);
@@ -176,11 +214,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       phone: input.phone.trim(),
       dob: input.dob,
       age,
-      avatar: 'photo_1',
+      avatar: input.customAvatarUri ? 'custom' : 'photo_1',
+      customAvatarUri: input.customAvatarUri || null,
       bio: '',
-      city: 'Mumbai',
+      city: input.city || 'Mumbai',
       interests: ['clubbing', 'nightlife', 'social hangouts'],
       isVerified: false,
+      verificationStatus: 'Not Submitted',
+      kycDocument: null,
       tier: 'Free Member',
       hasCompletedProfile: false,
     };
@@ -191,13 +232,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   /**
-   * Phase 1 Mock Login.
-   * Logs in user session in temporary local state.
+   * Login handler
    */
   const login = async (
     email: string
   ): Promise<{ success: boolean; hasCompletedProfile: boolean }> => {
-    // If existing in-memory user matches, retain their details & state
     if (user && user.email === email.trim().toLowerCase()) {
       setIsAuthenticated(true);
       return { success: true, hasCompletedProfile: !!user.hasCompletedProfile };
@@ -214,10 +253,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       dob: '2000-01-01',
       age: 24,
       avatar: 'photo_1',
+      customAvatarUri: null,
       bio: 'Ready to discover exciting nightspots and social events!',
       city: 'Mumbai',
       interests: ['clubbing', 'nightlife', 'social hangouts'],
       isVerified: false,
+      verificationStatus: 'Not Submitted',
+      kycDocument: null,
       tier: 'Free Member',
       hasCompletedProfile: true,
     };
@@ -227,7 +269,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   /**
-   * 1-Tap Quick Demo Login for instant testing without typing.
+   * 1-Tap Quick Demo Login (Pre-verified for test exploration)
    */
   const loginDemo = () => {
     setUser({ ...DEMO_USER });
@@ -235,9 +277,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   };
 
   /**
-   * Step 2 Profile Creation completion.
-   * Saves display name, bio, city, interests, and avatar.
-   * Age remains strictly derived from the validated DOB and cannot be overwritten.
+   * Saves Profile details.
    */
   const saveProfile = async (input: SaveProfileInput): Promise<boolean> => {
     if (!user) return false;
@@ -251,11 +291,110 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         city: input.city,
         interests: input.interests,
         avatar: input.avatar,
+        customAvatarUri:
+          input.customAvatarUri !== undefined
+            ? input.customAvatarUri
+            : prev.customAvatarUri,
         hasCompletedProfile: true,
       };
     });
 
     return true;
+  };
+
+  /**
+   * Updates or removes user profile photo.
+   */
+  const updateProfilePhoto = async (photoUri: string | null): Promise<void> => {
+    setUser((prev) => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        customAvatarUri: photoUri,
+        avatar: photoUri ? 'custom' : prev.avatar === 'custom' ? 'photo_1' : prev.avatar,
+      };
+    });
+  };
+
+  /**
+   * Updates location with manual or detected coordinates.
+   */
+  const updateLocation = async (
+    city: string,
+    detectedCoords?: { latitude: number; longitude: number }
+  ): Promise<void> => {
+    setUser((prev) => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        city: city.trim(),
+        detectedLocation: detectedCoords
+          ? { city: city.trim(), coords: detectedCoords }
+          : prev.detectedLocation,
+      };
+    });
+  };
+
+  /**
+   * Submits Government ID document for KYC and 18+ Age verification.
+   */
+  const submitKyc = async (payload: {
+    documentType: KycDocumentType;
+    documentUri: string;
+    documentName?: string;
+    confirmedOwnership: boolean;
+  }): Promise<{ status: VerificationStatus; message: string; verifiedAge?: number }> => {
+    if (!user) {
+      throw new Error('User session not found.');
+    }
+
+    const result = await verifyIdentityDocument({
+      ...payload,
+      userDob: user.dob,
+      fullName: user.fullName,
+    });
+
+    const isSuccess = result.status === 'Verified';
+
+    setUser((prev) => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        verificationStatus: result.status,
+        isVerified: isSuccess,
+        age: result.calculatedAge || prev.age,
+        kycDocument: {
+          documentType: payload.documentType,
+          documentUri: payload.documentUri,
+          documentName: payload.documentName,
+          submittedAt: new Date().toISOString(),
+          confirmedOwnership: payload.confirmedOwnership,
+          verifiedAge: result.calculatedAge,
+          rejectionReason: result.rejectionReason,
+        },
+      };
+    });
+
+    return {
+      status: result.status,
+      message: result.message,
+      verifiedAge: result.calculatedAge,
+    };
+  };
+
+  /**
+   * Resets KYC state to allow document re-upload after rejection.
+   */
+  const resetKyc = () => {
+    setUser((prev) => {
+      if (!prev) return null;
+      return {
+        ...prev,
+        verificationStatus: 'Not Submitted',
+        isVerified: false,
+        kycDocument: null,
+      };
+    });
   };
 
   const logout = () => {
@@ -268,10 +407,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       value={{
         user,
         isAuthenticated,
+        isVerifiedUser,
         signup,
         login,
         loginDemo,
         saveProfile,
+        updateProfilePhoto,
+        updateLocation,
+        submitKyc,
+        resetKyc,
         logout,
         calculateAge,
         validateDob,

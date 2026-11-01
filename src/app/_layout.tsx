@@ -44,6 +44,10 @@ export default function RootLayout() {
             options={{ title: 'Category Details' }}
           />
           <Stack.Screen
+            name="kyc-verification"
+            options={{ title: 'KYC Verification' }}
+          />
+          <Stack.Screen
             name="(tabs)"
             options={{ title: 'App', gestureEnabled: false }}
           />

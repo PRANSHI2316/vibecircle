@@ -13,6 +13,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Ionicons } from '@expo/vector-icons';
 import { Colors } from '@/constants/theme';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useAuth } from '@/context/AuthContext';
 
 interface DiscoverProfile {
   id: string;
@@ -119,6 +120,7 @@ const SAMPLE_PROFILES: DiscoverProfile[] = [
 export default function DiscoverScreen() {
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
+  const { user } = useAuth();
 
   const [search, setSearch] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
@@ -266,6 +268,90 @@ export default function DiscoverScreen() {
         <ScrollView
           showsVerticalScrollIndicator={false}
           contentContainerStyle={styles.profilesScroll}>
+          {/* User's Own Live Card */}
+          {user && (
+            <View
+              style={[
+                styles.userSelfCard,
+                {
+                  backgroundColor: colors.card,
+                  borderColor:
+                    user.verificationStatus === 'Verified'
+                      ? '#10B981'
+                      : colors.primary,
+                },
+              ]}>
+              <View style={styles.userSelfRow}>
+                {user.customAvatarUri ||
+                (user.avatar && user.avatar.startsWith('http')) ? (
+                  <Image
+                    source={{ uri: user.customAvatarUri || user.avatar }}
+                    style={styles.userSelfAvatar}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View
+                    style={[
+                      styles.userSelfAvatar,
+                      {
+                        backgroundColor: colors.primary,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      },
+                    ]}>
+                    <Text style={{ fontSize: 24 }}>✨</Text>
+                  </View>
+                )}
+
+                <View style={{ flex: 1, marginLeft: 12 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                    <Text style={[styles.userSelfName, { color: colors.text }]}>
+                      {user.displayName || user.fullName}, {user.age}
+                    </Text>
+                    {user.verificationStatus === 'Verified' ? (
+                      <Ionicons name="shield-checkmark" size={16} color="#10B981" />
+                    ) : (
+                      <Ionicons name="time" size={16} color="#F59E0B" />
+                    )}
+                  </View>
+                  <Text style={[styles.userSelfCity, { color: colors.textSecondary }]}>
+                    📍 {user.city} • Your Active Card
+                  </Text>
+                </View>
+
+                <View
+                  style={[
+                    styles.userSelfBadge,
+                    {
+                      backgroundColor:
+                        user.verificationStatus === 'Verified'
+                          ? '#10B98118'
+                          : '#F59E0B18',
+                      borderColor:
+                        user.verificationStatus === 'Verified'
+                          ? '#10B981'
+                          : '#F59E0B',
+                    },
+                  ]}>
+                  <Text
+                    style={[
+                      styles.userSelfBadgeText,
+                      {
+                        color:
+                          user.verificationStatus === 'Verified'
+                            ? '#10B981'
+                            : '#D97706',
+                      },
+                    ]}>
+                    {user.verificationStatus === 'Verified'
+                      ? 'Verified 18+'
+                      : user.verificationStatus}
+                  </Text>
+                </View>
+              </View>
+            </View>
+          )}
+
           {filteredProfiles.length === 0 ? (
             <View style={styles.emptyState}>
               <Ionicons name="search-outline" size={48} color={colors.textMuted} />
@@ -659,5 +745,38 @@ const styles = StyleSheet.create({
   actionBtnText: {
     fontSize: 14,
     fontWeight: '600',
+  },
+  userSelfCard: {
+    borderRadius: 16,
+    borderWidth: 1.5,
+    padding: 14,
+    marginBottom: 16,
+  },
+  userSelfRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  userSelfAvatar: {
+    width: 52,
+    height: 52,
+    borderRadius: 26,
+  },
+  userSelfName: {
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  userSelfCity: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  userSelfBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  userSelfBadgeText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
 });

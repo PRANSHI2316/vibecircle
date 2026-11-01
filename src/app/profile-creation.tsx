@@ -14,6 +14,8 @@ import { Ionicons } from '@expo/vector-icons';
 import { CustomInput } from '@/components/common/CustomInput';
 import { CustomButton } from '@/components/common/CustomButton';
 import { AvatarPicker } from '@/components/common/AvatarPicker';
+import { LocationInput } from '@/components/common/LocationInput';
+import { KycVerificationSection } from '@/components/common/KycVerificationSection';
 import { InterestChip } from '@/components/common/InterestChip';
 import { INTEREST_OPTIONS, POPULAR_CITIES } from '@/constants/brand';
 import { Colors } from '@/constants/theme';
@@ -24,12 +26,15 @@ export default function ProfileCreationScreen() {
   const router = useRouter();
   const scheme = useColorScheme();
   const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
-  const { user, saveProfile } = useAuth();
+  const { user, saveProfile, updateProfilePhoto } = useAuth();
 
   const isEditing = Boolean(user?.hasCompletedProfile);
 
   // Form State
   const [avatar, setAvatar] = useState(user?.avatar || 'photo_1');
+  const [customPhotoUri, setCustomPhotoUri] = useState<string | null>(
+    user?.customAvatarUri || null
+  );
   const [displayName, setDisplayName] = useState(user?.displayName || '');
   const [bio, setBio] = useState(user?.bio || '');
   const [city, setCity] = useState(user?.city || 'Mumbai');
@@ -43,7 +48,9 @@ export default function ProfileCreationScreen() {
   const [loading, setLoading] = useState(false);
 
   // Auto-calculated age from DOB (Strictly read-only)
-  const ageDisplay = user?.age ? `${user.age} years` : '18+ years';
+  const ageDisplay = user?.age ? `${user.age} years (Verified)` : '18+ years';
+  const isKycVerified = user?.verificationStatus === 'Verified';
+  const isKycUnderage = user?.verificationStatus === 'Underage – Access Denied';
 
   const toggleInterest = (id: string) => {
     setSelectedInterests((prev) =>
@@ -68,7 +75,18 @@ export default function ProfileCreationScreen() {
     }
 
     if (!city.trim()) {
-      errs.city = 'Please specify your city';
+      errs.city = 'Please specify your city or use current location';
+    }
+
+    // Mandatory KYC Requirement:
+    if (!isKycVerified) {
+      if (isKycUnderage) {
+        errs.form =
+          'Registration blocked: You are under 18. VibeCircle is strictly 18+.';
+      } else {
+        errs.form =
+          'Mandatory Identity Verification: Please complete the government ID verification below before proceeding.';
+      }
     }
 
     setErrors(errs);
@@ -86,7 +104,12 @@ export default function ProfileCreationScreen() {
         city: city.trim(),
         interests: selectedInterests,
         avatar,
+        customAvatarUri: customPhotoUri,
       });
+
+      if (customPhotoUri !== undefined) {
+        await updateProfilePhoto(customPhotoUri);
+      }
 
       // After profile creation / update, open Home tab
       router.replace('/(tabs)');
@@ -119,7 +142,7 @@ export default function ProfileCreationScreen() {
 
             <View style={[styles.stepBadge, { backgroundColor: colors.primary + '20' }]}>
               <Text style={[styles.stepBadgeText, { color: colors.primary }]}>
-                {isEditing ? 'Profile Settings' : 'Step 2 • Profile Setup'}
+                {isEditing ? 'Profile Settings' : 'Step 2 • Profile Setup & Verification'}
               </Text>
             </View>
 
@@ -129,7 +152,7 @@ export default function ProfileCreationScreen() {
             <Text style={[styles.subtitle, { color: colors.textSecondary }]}>
               {isEditing
                 ? 'Update your photo, bio, city, and party interests'
-                : 'Set up your public card to find clubbing squads, nightspots & social hangouts'}
+                : 'Upload your photo, set your verified city, and complete government ID verification'}
             </Text>
           </View>
 
@@ -143,8 +166,16 @@ export default function ProfileCreationScreen() {
             </View>
           )}
 
-          {/* 1. Profile Photo / Avatar Picker */}
-          <AvatarPicker selectedId={avatar} onSelect={setAvatar} />
+          {/* 1. Profile Photo Upload (Gallery, Camera, Remove) */}
+          <AvatarPicker
+            selectedId={avatar}
+            customPhotoUri={customPhotoUri}
+            onSelect={setAvatar}
+            onPhotoSelected={(uri) => {
+              setCustomPhotoUri(uri);
+              if (uri) setAvatar('custom');
+            }}
+          />
 
           {/* 2. Display Name */}
           <CustomInput
@@ -161,7 +192,7 @@ export default function ProfileCreationScreen() {
             helperText="Visible to other verified members in clubs and hangouts"
           />
 
-          {/* 3. Age (Strictly read-only, calculated from DOB) */}
+          {/* 3. Age (Strictly read-only, verified from DOB) */}
           <CustomInput
             label="Age (Verified from Date of Birth)"
             value={ageDisplay}
@@ -170,23 +201,31 @@ export default function ProfileCreationScreen() {
             helperText="Auto-calculated from your Date of Birth. For safety, age cannot be changed manually."
           />
 
-          {/* 4. City Selection */}
-          <View style={styles.sectionContainer}>
-            <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
-              Current City
-            </Text>
+          {/* 4. Current Location & City Field */}
+          <LocationInput
+            label="Current Location / City"
+            value={city}
+            onChangeText={(text) => {
+              setCity(text);
+              if (errors.city) setErrors((prev) => ({ ...prev, city: '' }));
+            }}
+            error={errors.city}
+          />
 
-            {/* Popular City Quick-Select Pills */}
+          {/* Popular City Quick-Select Pills */}
+          <View style={styles.quickCitiesBox}>
+            <Text style={[styles.quickCitiesLabel, { color: colors.textSecondary }]}>
+              Popular City Suggestions:
+            </Text>
             <ScrollView
               horizontal
               showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.cityPillsRow}>
+              contentContainerStyle={styles.citiesScroll}>
               {POPULAR_CITIES.map((c) => {
                 const isSelected = city === c;
                 return (
                   <TouchableOpacity
                     key={c}
-                    activeOpacity={0.7}
                     onPress={() => {
                       setCity(c);
                       if (errors.city) setErrors((prev) => ({ ...prev, city: '' }));
@@ -194,12 +233,8 @@ export default function ProfileCreationScreen() {
                     style={[
                       styles.cityPill,
                       {
-                        backgroundColor: isSelected
-                          ? colors.primary
-                          : colors.card,
-                        borderColor: isSelected
-                          ? colors.primary
-                          : colors.cardBorder,
+                        backgroundColor: isSelected ? colors.primary : colors.card,
+                        borderColor: isSelected ? colors.primary : colors.cardBorder,
                       },
                     ]}>
                     <Text
@@ -210,84 +245,83 @@ export default function ProfileCreationScreen() {
                           fontWeight: isSelected ? '700' : '500',
                         },
                       ]}>
-                      📍 {c}
+                      {c}
                     </Text>
                   </TouchableOpacity>
                 );
               })}
             </ScrollView>
-
-            {/* Free-form text input for other cities */}
-            <CustomInput
-              placeholder="Or type a different city..."
-              value={city}
-              onChangeText={(text) => {
-                setCity(text);
-                if (errors.city) setErrors((prev) => ({ ...prev, city: '' }));
-              }}
-              leftIcon="location-outline"
-              error={errors.city}
-              containerStyle={{ marginTop: 8 }}
-            />
           </View>
 
-          {/* 5. Interests: clubbing, nightlife, events, travel, food, and social hangouts */}
-          <View style={styles.sectionContainer}>
-            <View style={styles.interestsHeaderRow}>
-              <Text style={[styles.sectionLabel, { color: colors.textSecondary }]}>
-                Interests & Vibes
-              </Text>
-              <Text style={[styles.interestsCount, { color: colors.primary }]}>
-                {selectedInterests.length} selected
-              </Text>
-            </View>
-            <Text style={[styles.sectionHint, { color: colors.textMuted }]}>
-              Select the vibes you want to discover and be discovered for:
-            </Text>
-
-            <View style={styles.interestsGrid}>
-              {INTEREST_OPTIONS.map((item) => (
-                <InterestChip
-                  key={item.id}
-                  item={item}
-                  selected={selectedInterests.includes(item.id)}
-                  onToggle={() => toggleInterest(item.id)}
-                />
-              ))}
-            </View>
-
-            {Boolean(errors.interests) && (
-              <View style={styles.errorRow}>
-                <Ionicons name="alert-circle" size={14} color={colors.danger} />
-                <Text style={[styles.errorText, { color: colors.danger }]}>
-                  {errors.interests}
-                </Text>
-              </View>
-            )}
-          </View>
-
-          {/* 6. Short Bio */}
+          {/* 5. Bio / Social Intent */}
           <CustomInput
-            label="Short Bio"
-            placeholder="Tell your circle what you're looking for (e.g., weekend clubbing squads, techno gigs, brunch partners, or wedding companions)..."
+            label="Short Bio / Vibe"
+            placeholder="e.g. Techno weekend regular, coffee explorer in Bandra, looking for clubbing squads..."
             value={bio}
             onChangeText={setBio}
             multiline
-            numberOfLines={4}
-            maxLength={160}
-            showCharCount
-            helperText="Keep it friendly, authentic, and nightlife-ready"
+            numberOfLines={3}
+            helperText="Tell others what kind of scenes and meetups you enjoy"
           />
 
-          {/* 7. Save Profile Button */}
-          <View style={styles.footerSection}>
+          {/* 6. Interests Selector */}
+          <View style={styles.sectionContainer}>
+            <View style={styles.interestLabelRow}>
+              <Text style={[styles.sectionLabel, { color: colors.text }]}>
+                What are you looking for?{' '}
+                <Text style={{ color: colors.primary }}>*</Text>
+              </Text>
+              <Text style={[styles.countBadge, { color: colors.primary }]}>
+                {selectedInterests.length} selected
+              </Text>
+            </View>
+
+            {Boolean(errors.interests) && (
+              <Text style={styles.fieldErrorText}>{errors.interests}</Text>
+            )}
+
+            <View style={styles.interestsGrid}>
+              {INTEREST_OPTIONS.map((opt) => (
+                <InterestChip
+                  key={opt.id}
+                  item={opt}
+                  selected={selectedInterests.includes(opt.id)}
+                  onToggle={() => toggleInterest(opt.id)}
+                />
+              ))}
+            </View>
+          </View>
+
+          {/* 7. Mandatory KYC & 18+ Identity Verification Section */}
+          <KycVerificationSection
+            onSuccess={() => {
+              if (errors.form) setErrors((prev) => ({ ...prev, form: '' }));
+            }}
+            onUnderageBlocked={() => {
+              setErrors({
+                form: 'Access Denied: You are under 18. VibeCircle registration is rejected.',
+              });
+            }}
+          />
+
+          {/* Submit / Save Profile Button */}
+          <View style={styles.ctaWrapper}>
             <CustomButton
-              title="Save Profile"
+              title={
+                isKycUnderage
+                  ? 'Access Denied (Underage)'
+                  : isEditing
+                  ? 'Save Profile Changes'
+                  : isKycVerified
+                  ? 'Complete & Enter VibeCircle'
+                  : 'Verify ID & Enter VibeCircle'
+              }
               onPress={handleSave}
               loading={loading}
+              disabled={isKycUnderage}
               variant="primary"
               size="lg"
-              icon="sparkles"
+              icon={isKycVerified ? 'arrow-forward' : 'shield-checkmark'}
               iconPosition="right"
             />
           </View>
@@ -304,15 +338,15 @@ const styles = StyleSheet.create({
   scrollContent: {
     paddingHorizontal: 20,
     paddingTop: 16,
-    paddingBottom: 40,
+    paddingBottom: 48,
   },
   header: {
-    marginBottom: 10,
+    marginBottom: 20,
   },
   backBtn: {
-    width: 40,
-    height: 40,
-    borderRadius: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 18,
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
@@ -322,23 +356,23 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     paddingHorizontal: 10,
     paddingVertical: 4,
-    borderRadius: 8,
+    borderRadius: 12,
     marginBottom: 8,
   },
   stepBadgeText: {
-    fontSize: 11,
+    fontSize: 12,
     fontWeight: '700',
-    letterSpacing: 0.3,
+    letterSpacing: 0.5,
   },
   title: {
     fontSize: 26,
     fontWeight: '800',
-    letterSpacing: -0.3,
+    letterSpacing: -0.5,
+    marginBottom: 6,
   },
   subtitle: {
     fontSize: 14,
     lineHeight: 20,
-    marginTop: 4,
   },
   bannerError: {
     flexDirection: 'row',
@@ -354,57 +388,57 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   sectionContainer: {
-    marginVertical: 10,
+    marginVertical: 14,
   },
   sectionLabel: {
-    fontSize: 13,
-    fontWeight: '600',
-    letterSpacing: 0.2,
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 8,
+  },
+  quickCitiesBox: {
+    marginBottom: 16,
+    marginTop: -8,
+  },
+  quickCitiesLabel: {
+    fontSize: 11.5,
     marginBottom: 6,
+    fontWeight: '500',
   },
-  sectionHint: {
-    fontSize: 12,
-    marginBottom: 10,
-  },
-  cityPillsRow: {
+  citiesScroll: {
     gap: 8,
-    paddingBottom: 4,
+    paddingVertical: 2,
   },
   cityPill: {
     paddingHorizontal: 12,
-    paddingVertical: 8,
+    paddingVertical: 6,
     borderRadius: 16,
-    borderWidth: 1.5,
-    marginRight: 6,
+    borderWidth: 1,
   },
   cityPillText: {
-    fontSize: 13,
+    fontSize: 12,
   },
-  interestsHeaderRow: {
+  interestLabelRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
+    marginBottom: 10,
   },
-  interestsCount: {
+  countBadge: {
     fontSize: 12,
     fontWeight: '700',
+  },
+  fieldErrorText: {
+    color: '#EF4444',
+    fontSize: 12,
+    marginBottom: 8,
   },
   interestsGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
+    gap: 8,
   },
-  errorRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 2,
-  },
-  errorText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  footerSection: {
+  ctaWrapper: {
     marginTop: 20,
-    alignItems: 'center',
+    marginBottom: 20,
   },
 });
